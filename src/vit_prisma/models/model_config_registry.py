@@ -18,6 +18,7 @@ class ModelCategory(Enum):
     DINO = "dino"
     VIVIT = "vivit"
     VJEPA = "vjepa"
+    VJEPA2 = "vjepa2"
 
 
 # ===============================
@@ -597,6 +598,26 @@ VJEPA_CONFIGS = {
     },
 }
 
+_VJEPA2_BASE = {
+    "use_cls_token": False,
+    "use_rope": True,
+    "positional_embedding_type": "rotary",
+    "is_video_transformer": True,
+    "video_tubelet_depth": 2,
+    "video_num_frames": 64,
+    "return_type": "pre_logits",
+    "classification_type": "gaap",
+    "eps": 1e-6,
+    "layer_norm_pre": False,
+}
+
+VJEPA2_CONFIGS = {
+    "facebook/vjepa2-vitl-fpc64-256": {**_VJEPA2_BASE},
+    "facebook/vjepa2-vith-fpc64-256": {**_VJEPA2_BASE},
+    "facebook/vjepa2-vitg-fpc64-256": {**_VJEPA2_BASE},
+    "facebook/vjepa2-vitg-fpc64-384": {**_VJEPA2_BASE},
+}
+
 
 # ===============================
 # Text Model Configurations
@@ -702,6 +723,7 @@ MODEL_CATEGORIES = {
     **{name: ModelCategory.DINO for name in DINO_CONFIGS},
     **{name: ModelCategory.VIVIT for name in VIVIT_CONFIGS},
     **{name: ModelCategory.VJEPA for name in VJEPA_CONFIGS},
+    **{name: ModelCategory.VJEPA2 for name in VJEPA2_CONFIGS},
 }
 
 # Combined configuration dictionary
@@ -715,6 +737,7 @@ MODEL_CONFIGS = {
         **DINO_CONFIGS,
         **VIVIT_CONFIGS,
         **VJEPA_CONFIGS,
+        **VJEPA2_CONFIGS,
     },
     # Text configurations
     ModelType.TEXT: {

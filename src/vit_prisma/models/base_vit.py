@@ -56,7 +56,6 @@ DTYPE_FROM_STRING = {
 }
 
 
-
 class HookedViT(HookedTransformer):
     """
     Base vision model.
@@ -122,7 +121,8 @@ class HookedViT(HookedTransformer):
             block = TransformerBlock
 
         self.blocks = nn.ModuleList(
-            [block(self.cfg, block_index) for block_index in range(self.cfg.n_layers)]
+            [block(self.cfg, block_index)
+             for block_index in range(self.cfg.n_layers)]
         )
         # Final layer norm
         if self.cfg.normalization_type == "LN":
@@ -174,9 +174,11 @@ class HookedViT(HookedTransformer):
             )  # CLS token for each item in the batch
             embed = torch.cat((cls_tokens, embed), dim=1)  # Add to embedding
 
-        pos_embed = self.hook_pos_embed(self.pos_embed(input))
-
-        residual = embed + pos_embed
+        if self.cfg.positional_embedding_type == "rotary":
+            residual = embed
+        else:
+            pos_embed = self.hook_pos_embed(self.pos_embed(input))
+            residual = embed + pos_embed
 
         self.hook_full_embed(residual)
 
@@ -195,7 +197,6 @@ class HookedViT(HookedTransformer):
         if self.cfg.classification_type == "gaap":  # GAAP
 
             x = x.mean(dim=1)
-            print(self.cfg.return_type)
         elif self.cfg.classification_type == "cls":  # CLS token
             cls_token = x[:, 0]
             if "dino-vitb" in self.cfg.model_name:
@@ -438,22 +439,23 @@ class HookedViT(HookedTransformer):
 
                     del state_dict[f"blocks.{l}.mlp.ln.w"]
 
-        if not self.cfg.final_rms and fold_biases:
-            state_dict[f"head.b_H"] = state_dict[f"head.b_H"] + (
-                state_dict[f"head.W_H"] * state_dict[f"ln_final.b"][:, None]
-            ).sum(dim=-2)
-            del state_dict[f"ln_final.b"]
+        if self.cfg.return_type != "pre_logits":
+            if not self.cfg.final_rms and fold_biases:
+                state_dict[f"head.b_H"] = state_dict[f"head.b_H"] + (
+                    state_dict[f"head.W_H"] *
+                    state_dict[f"ln_final.b"][:, None]
+                ).sum(dim=-2)
+                del state_dict[f"ln_final.b"]
 
-        state_dict[f"head.W_H"] = (
-            state_dict[f"head.W_H"] * state_dict[f"ln_final.w"][:, None]
-        )
-        del state_dict[f"ln_final.w"]
-
-        if center_weights:
-            # Center the weights that read in from the LayerNormPre
-            state_dict[f"head.W_H"] -= einops.reduce(
-                state_dict[f"head.W_H"], "d_model n_classes -> 1 n_classes", "mean"
+            state_dict[f"head.W_H"] = (
+                state_dict[f"head.W_H"] * state_dict[f"ln_final.w"][:, None]
             )
+            del state_dict[f"ln_final.w"]
+
+            if center_weights:
+                state_dict[f"head.W_H"] -= einops.reduce(
+                    state_dict[f"head.W_H"], "d_model n_classes -> 1 n_classes", "mean"
+                )
 
         print("LayerNorm folded.")
 
@@ -592,7 +594,8 @@ class HookedViT(HookedTransformer):
             )
 
             W_Q_eff_even, W_K_eff_even_T = (
-                FactoredMatrix(W_Q_eff, W_K_eff.transpose(-1, -2)).make_even().pair
+                FactoredMatrix(W_Q_eff, W_K_eff.transpose(-1, -2)
+                               ).make_even().pair
             )
             W_K_eff_even = W_K_eff_even_T.transpose(-1, -2)
 
@@ -641,15 +644,16 @@ class HookedViT(HookedTransformer):
         self.hook_embed.to(devices.get_device_for_block_index(0, self.cfg))
         if self.cfg.positional_embedding_type != "rotary":
             self.pos_embed.to(devices.get_device_for_block_index(0, self.cfg))
-            self.hook_pos_embed.to(devices.get_device_for_block_index(0, self.cfg))
+            self.hook_pos_embed.to(
+                devices.get_device_for_block_index(0, self.cfg))
         if hasattr(self, "ln_final"):
             self.ln_final.to(
-                devices.get_device_for_block_index(self.cfg.n_layers - 1, self.cfg)
+                devices.get_device_for_block_index(
+                    self.cfg.n_layers - 1, self.cfg)
             )
         for i, block in enumerate(self.blocks):
             block.to(devices.get_device_for_block_index(i, self.cfg))
 
-      
     def from_local(cls, model_config: ViTConfig, checkpoint_path: str):
         model = cls(model_config)
         print(f"Loading the model locally from: {checkpoint_path}")
@@ -740,7 +744,8 @@ class HookedViT(HookedTransformer):
             bias (torch.Tensor): [d_model], accumulated bias
         """
 
-        accumulated_bias = torch.zeros(self.cfg.d_model, device=self.cls_token.device)
+        accumulated_bias = torch.zeros(
+            self.cfg.d_model, device=self.cls_token.device)
 
         for i in range(layer):
             accumulated_bias += self.blocks[i].attn.b_O
@@ -922,7 +927,8 @@ class HookedSAEViT(HookedViT):
 
         if prev_saes:
             if len(act_names) != len(prev_saes):
-                raise ValueError("act_names and prev_saes must have the same length")
+                raise ValueError(
+                    "act_names and prev_saes must have the same length")
         else:
             prev_saes = [None] * len(act_names)  # type: ignore
 
@@ -1009,8 +1015,10 @@ class HookedSAEViT(HookedViT):
         *model_args: Any,
         saes: Union[SAE, List[SAE]] = [],
         reset_saes_end: bool = True,
-        fwd_hooks: List[Tuple[Union[str, Callable], Callable]] = [],  # type: ignore
-        bwd_hooks: List[Tuple[Union[str, Callable], Callable]] = [],  # type: ignore
+        # type: ignore
+        fwd_hooks: List[Tuple[Union[str, Callable], Callable]] = [],
+        # type: ignore
+        bwd_hooks: List[Tuple[Union[str, Callable], Callable]] = [],
         reset_hooks_end: bool = True,
         clear_contexts: bool = False,
         **model_kwargs: Any,

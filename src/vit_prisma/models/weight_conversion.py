@@ -145,6 +145,75 @@ def convert_vjepa_weights(
     return new_vision_model_state_dict
 
 
+def convert_vjepa2_weights(
+    old_state_dict,
+    cfg: HookedViTConfig,
+    device="cuda",
+):
+    new_state_dict = {}
+
+    new_state_dict["embed.proj.weight"] = old_state_dict[
+        "embeddings.patch_embeddings.proj.weight"
+    ]
+    new_state_dict["embed.proj.bias"] = old_state_dict[
+        "embeddings.patch_embeddings.proj.bias"
+    ]
+
+    new_state_dict["ln_final.w"] = old_state_dict["layernorm.weight"]
+    new_state_dict["ln_final.b"] = old_state_dict["layernorm.bias"]
+
+    for layer in range(cfg.n_layers):
+        src = f"layer.{layer}"
+        dst = f"blocks.{layer}"
+
+        new_state_dict[f"{dst}.ln1.w"] = old_state_dict[f"{src}.norm1.weight"]
+        new_state_dict[f"{dst}.ln1.b"] = old_state_dict[f"{src}.norm1.bias"]
+        new_state_dict[f"{dst}.ln2.w"] = old_state_dict[f"{src}.norm2.weight"]
+        new_state_dict[f"{dst}.ln2.b"] = old_state_dict[f"{src}.norm2.bias"]
+
+        W_Q = old_state_dict[f"{src}.attention.query.weight"]
+        W_K = old_state_dict[f"{src}.attention.key.weight"]
+        W_V = old_state_dict[f"{src}.attention.value.weight"]
+        W_O = old_state_dict[f"{src}.attention.proj.weight"]
+
+        W_Q = einops.rearrange(W_Q, "(h dh) d -> h d dh", h=cfg.n_heads, dh=cfg.d_head)
+        W_K = einops.rearrange(W_K, "(h dh) d -> h d dh", h=cfg.n_heads, dh=cfg.d_head)
+        W_V = einops.rearrange(W_V, "(h dh) d -> h d dh", h=cfg.n_heads, dh=cfg.d_head)
+        W_O = einops.rearrange(W_O, "d (h dh) -> h dh d", h=cfg.n_heads, dh=cfg.d_head)
+
+        new_state_dict[f"{dst}.attn.W_Q"] = W_Q
+        new_state_dict[f"{dst}.attn.W_K"] = W_K
+        new_state_dict[f"{dst}.attn.W_V"] = W_V
+        new_state_dict[f"{dst}.attn.W_O"] = W_O
+
+        b_Q = old_state_dict[f"{src}.attention.query.bias"]
+        b_K = old_state_dict[f"{src}.attention.key.bias"]
+        b_V = old_state_dict[f"{src}.attention.value.bias"]
+        b_O = old_state_dict[f"{src}.attention.proj.bias"]
+
+        b_Q = einops.rearrange(b_Q, "(h dh) -> h dh", h=cfg.n_heads, dh=cfg.d_head)
+        b_K = einops.rearrange(b_K, "(h dh) -> h dh", h=cfg.n_heads, dh=cfg.d_head)
+        b_V = einops.rearrange(b_V, "(h dh) -> h dh", h=cfg.n_heads, dh=cfg.d_head)
+
+        new_state_dict[f"{dst}.attn.b_Q"] = b_Q
+        new_state_dict[f"{dst}.attn.b_K"] = b_K
+        new_state_dict[f"{dst}.attn.b_V"] = b_V
+        new_state_dict[f"{dst}.attn.b_O"] = b_O
+
+        mlp_W_in = einops.rearrange(old_state_dict[f"{src}.mlp.fc1.weight"], "m d -> d m")
+        mlp_W_out = einops.rearrange(old_state_dict[f"{src}.mlp.fc2.weight"], "d m -> m d")
+
+        new_state_dict[f"{dst}.mlp.W_in"] = mlp_W_in
+        new_state_dict[f"{dst}.mlp.W_out"] = mlp_W_out
+        new_state_dict[f"{dst}.mlp.b_in"] = old_state_dict[f"{src}.mlp.fc1.bias"]
+        new_state_dict[f"{dst}.mlp.b_out"] = old_state_dict[f"{src}.mlp.fc2.bias"]
+
+    new_state_dict["head.W_H"] = torch.eye(cfg.d_model)
+    new_state_dict["head.b_H"] = torch.zeros((cfg.d_model,))
+
+    return new_state_dict
+
+
 def convert_kandinsky_clip_weights(
     old_state_dict,
     cfg: HookedViTConfig,

@@ -36,6 +36,7 @@ from vit_prisma.models.weight_conversion import (
     convert_timm_weights,
     convert_vivet_weights,
     convert_vjepa_weights,
+    convert_vjepa2_weights,
     download_pretrained_from_hf,
     load_state_dict,
     remove_open_clip_prefix,
@@ -203,6 +204,9 @@ def load_config(
     elif category in [ModelCategory.CLIP, ModelCategory.VIVIT]:
         old_config = _get_general_hf_config(model_name, model_type)
         new_config = _create_config_from_hf(old_config, model_name, model_type)
+    elif category == ModelCategory.VJEPA2:
+        old_config = _get_general_hf_config(model_name, model_type=None)
+        new_config = _create_config_from_vjepa2(old_config, model_name)
 
     # Apply registry overrides
     registry_overrides = MODEL_CONFIGS[model_type].get(model_name, {})
@@ -676,6 +680,9 @@ def load_original_weights(
     elif category == ModelCategory.VJEPA:
         return _load_vjepa_weights(model_name, **kwargs)
 
+    elif category == ModelCategory.VJEPA2:
+        return _load_vjepa2_weights(model_name, **kwargs)
+
     elif category == ModelCategory.KANDINSKY:
         return _load_kandinsky_weights(model_name, **kwargs)
 
@@ -730,6 +737,8 @@ def convert_weights(
         converter = convert_vivet_weights
     elif category == ModelCategory.VJEPA:
         converter = convert_vjepa_weights
+    elif category == ModelCategory.VJEPA2:
+        converter = convert_vjepa2_weights
     elif category == ModelCategory.KANDINSKY:
         converter = convert_kandinsky_clip_weights
     else:
@@ -873,6 +882,37 @@ def _load_vjepa_weights(model_name, **kwargs):
     model_path = model_paths[model_name]["loc"]
     model = VJEPAModel.from_pretrained(model_path)
     return model.state_dict()
+
+
+def _load_vjepa2_weights(model_name, **kwargs):
+    """Load encoder weights from a V-JEPA 2 HuggingFace model."""
+    from transformers import AutoModel
+
+    model = AutoModel.from_pretrained(model_name)
+    for param in model.parameters():
+        param.requires_grad = False
+    encoder_prefix = "encoder."
+    return {
+        k[len(encoder_prefix):]: v
+        for k, v in model.state_dict().items()
+        if k.startswith(encoder_prefix)
+    }
+
+
+def _create_config_from_vjepa2(hf_config, model_name: str):
+    """Create HookedViTConfig from a V-JEPA 2 HuggingFace config."""
+    config = HookedViTConfig()
+    config.d_model = hf_config.hidden_size
+    config.n_layers = hf_config.num_hidden_layers
+    config.n_heads = hf_config.num_attention_heads
+    config.d_mlp = int(hf_config.hidden_size * hf_config.mlp_ratio)
+    config.image_size = hf_config.crop_size
+    config.patch_size = hf_config.patch_size
+    config.model_name = model_name
+    config.n_classes = hf_config.hidden_size
+    config.eps = hf_config.layer_norm_eps
+    config.initializer_range = hf_config.initializer_range
+    return config
 
 
 def _load_kandinsky_weights(model_name, **kwargs):
