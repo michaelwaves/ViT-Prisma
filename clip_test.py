@@ -14,7 +14,10 @@ from vit_prisma.dataloaders.imagenet_index import imagenet_index
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 REPO_ID = "Prisma-Multimodal/sparse-autoencoder-clip-b-32-sae-vanilla-x64-layer-10-hook_mlp_out-l1-1e-05"
-IMAGE_PATH = "src/vit_prisma/sample_images/n01818515_39.JPEG"
+# IMAGE_PATH = "src/vit_prisma/sample_images/n01818515_39.JPEG"
+
+IMAGE_PATH = "src/vit_prisma/sample_images/fruit_bowl.jpeg"
+# IMAGE_PATH = "image.png"
 N_TOP_FEATURES = 10
 IMAGENET_CLASSES = [imagenet_index[str(i)][1] for i in range(1000)]
 
@@ -74,7 +77,9 @@ def print_clip_predictions(image_path: str, n_top: int = 10):
         text_features = model.encode_text(text_tokens)
         image_features /= image_features.norm(dim=-1, keepdim=True)
         text_features /= text_features.norm(dim=-1, keepdim=True)
-        similarity = (image_features @ text_features.T).squeeze(0)
+        logit_scale = model.logit_scale.exp()
+        similarity = (logit_scale * image_features @
+                      text_features.T).squeeze(0)
 
     probs = similarity.softmax(dim=-1).cpu().numpy()
     top_indices = np.argsort(probs)[-n_top:][::-1]
@@ -136,7 +141,7 @@ def plot_patch_heatmap(
         axes[i + 1].axis("off")
 
     plt.tight_layout()
-    plt.savefig("sae_features.png", dpi=150, bbox_inches="tight")
+    plt.savefig("sae_features_fruit_bowl.png", dpi=150, bbox_inches="tight")
     print("\nSaved visualization to sae_features.png")
     plt.show()
 
